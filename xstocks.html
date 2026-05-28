@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xstocks</title>
+<link rel="stylesheet" href="xstocks.css">
+<link rel="stylesheet" href="xstocks-mobile.css">
+</head>
+<body>
+
+<div class="header">
+    <div class="header-title">
+        <img src="xstocks.ico" class="logo-icon" alt="">
+        <h1 data-hearth-name>xstocks</h1>
+    </div>
+    <div class="header-actions">
+        <button class="btn" onclick="handleRefresh(event)" id="refreshBtn" title="Shift+Click to refresh all watchlists">Refresh</button>
+        <button class="btn" onclick="showSettings()" id="settingsBtn">⚙</button>
+    </div>
+</div>
+
+<div class="tabs" id="tabBar">
+    <div class="tab active" data-tab="watchlist" onclick="switchTab('watchlist')">Watchlist</div>
+    <div class="tab" data-tab="chart" onclick="switchTab('chart')">Chart</div>
+    <div class="tab" data-tab="news" onclick="switchTab('news')">News</div>
+    <div class="tab" data-tab="earnings" onclick="switchTab('earnings')">Earnings</div>
+</div>
+
+<div class="content" id="content">
+    <!-- Dynamic content -->
+</div>
+
+<div class="status-bar">
+    <span id="statusText">Ready</span>
+    <span id="statusTime"></span>
+</div>
+
+<script src="xstocks.js"></script>
+</body>
+</html>

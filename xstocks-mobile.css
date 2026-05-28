@@ -1,0 +1,81 @@
+/* xstocks mobile overrides */
+
+@media (max-width: 600px) {
+    .header {
+        padding: 10px 16px;
+    }
+
+    .tabs {
+        padding: 0 12px;
+        overflow-x: auto;
+    }
+
+    .tab {
+        padding: 10px 14px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+    .content {
+        padding: 16px;
+    }
+
+    /* Horizontal scroll for wide tables */
+    .watchlist-table,
+    .earnings-table {
+        display: block;
+        overflow-x: auto;
+    }
+
+    .add-bar {
+        flex-wrap: wrap;
+    }
+
+    .add-bar input {
+        font-size: 16px; /* prevent iOS auto-zoom */
+        flex: 1;
+    }
+
+    .add-bar select {
+        font-size: 16px;
+    }
+
+    .setup > input[type="text"] {
+        font-size: 16px;
+        width: 100%;
+        max-width: 340px;
+    }
+
+    .reorder-pos {
+        font-size: 16px; /* prevent iOS auto-zoom */
+    }
+
+    .detail-header {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .chart-controls {
+        flex-wrap: wrap;
+    }
+    .watchlist-nav-select {
+        font-size: 16px; /* prevent iOS auto-zoom */
+        max-width: 140px;
+    }
+
+    .date-range-row {
+        flex-wrap: wrap;
+    }
+    .date-input, .time-input {
+        font-size: 16px; /* prevent iOS auto-zoom */
+    }
+
+    .chart-container {
+        height: 240px;
+    }
+
+    /* Hide custom scrollbars on mobile */
+    .content::-webkit-scrollbar {
+        display: none;
+    }
+}
