@@ -23,7 +23,9 @@ Run the following to install/update:
 
 NOTE: The script will also install the necessary Hearth framework, but if you point it to a directory where it already exists then it will give you the option to just install/update xstocks.
 
-(Need to add how to setup Finhubb API key)
+## Finhubb API Key
+To get a Finnhub API key, create a free account at: https://finnhub.io/register
+Once logged in, navigate to your Dashboard. You will see your API Key (Token) listed right at the top.
 
 ## Uninstall
 Everything is self-contained to the folder you install to so if you don't like it you can just delete the folder to remove/uninstall.
