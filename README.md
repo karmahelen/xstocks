@@ -25,6 +25,7 @@ NOTE: The script will also install the necessary Hearth framework, but if you po
 
 ## Finhubb API Key
 To get a Finnhub API key, create a free account at: https://finnhub.io/register
+
 Once logged in, navigate to your Dashboard. You will see your API Key (Token) listed right at the top.
 
 ## Uninstall
