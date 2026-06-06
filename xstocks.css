@@ -197,6 +197,20 @@ body {
     margin-bottom: 16px;
 }
 
+/* Multi-mode legend: one colored "SYMBOL +/-pct%" chip per selected ticker, sitting
+   below the period buttons and above the chart. Symbol + percent share the line color
+   (set inline per series); wraps across rows for many tickers. */
+.chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.legend-item { white-space: nowrap; }
+
 /* Symbol-selection row (Chart/News/Earnings): wrapping symbol buttons on the
    left, compact watchlist nav pinned to the top-right. The outer row stays
    nowrap with align-items:flex-start so the nav holds its top-right position
@@ -495,3 +509,220 @@ canvas#chartOverlay {
     justify-content: space-between;
     flex-shrink: 0;
 }
+
+/* -- Analysis tab -- */
+
+/* Section label (e.g. "Strengths & weaknesses") */
+.lbl {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text2);
+    margin: 0 0 8px;
+}
+
+/* Highlight color utilities — also used for the OI max-pain marker label */
+.g { color: var(--green); }
+.r { color: var(--red); }
+.o { color: var(--orange); }
+
+/* Strengths & weaknesses strip: auto-fitting chips, each with an icon + title + detail */
+.hls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px;
+    margin-bottom: 20px;
+}
+.hl {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 11px;
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+}
+.hl .aicon { width: 17px; height: 17px; flex-shrink: 0; margin-top: 1px; }
+.hl .h { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+.hl .d { font-size: 12px; color: var(--text2); margin: 0; line-height: 1.35; }
+.hl-empty { font-size: 13px; color: var(--text2); }
+
+/* Panels grid */
+.panels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    align-items: start;
+}
+.pan {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 13px 15px;
+}
+.pan h3 {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text);
+    margin: 0 0 11px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+.pan h3 .aicon { color: var(--accent); }
+
+/* Base for all inline-SVG icons in the analysis tab (themed via currentColor) */
+.aicon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* Metric rows */
+.mr {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 5px 0;
+    font-size: 13px;
+    border-bottom: 1px solid var(--bg3);
+}
+.mr:last-child { border-bottom: none; }
+.mr .k { color: var(--text2); }
+.mr .v { font-variant-numeric: tabular-nums; font-weight: 500; }
+.mr .v.warn { color: var(--orange); }
+
+.pan-foot { font-size: 11px; color: var(--text2); padding-top: 8px; }
+
+/* 52-week range bar */
+.rng-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--text2); }
+.rng {
+    height: 5px;
+    background: var(--bg3);
+    border-radius: 3px;
+    position: relative;
+    margin: 7px 0 3px;
+}
+.rng .f {
+    position: absolute;
+    top: -2px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+    transform: translateX(-50%);
+}
+.rng-pos { font-size: 11px; color: var(--text2); text-align: center; }
+
+/* Analyst buy/hold/sell stacked bar */
+.bhs { display: flex; height: 7px; border-radius: 3px; overflow: hidden; margin: 7px 0; }
+.bhs-lab { display: flex; justify-content: space-between; font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+
+/* Inline badge (e.g. IV rank in the options panel header) */
+.badge {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 500;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: var(--bg3);
+    color: var(--text2);
+    border: 1px solid var(--border);
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+/* Open-interest-by-strike mini histogram */
+.oi-title { font-size: 11px; color: var(--text2); margin: 10px 0 2px; }
+.oi {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    height: 78px;
+    gap: 3px;
+    position: relative;
+}
+.oicol {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 2px;
+    align-items: center;
+    height: 100%;
+}
+.oibar { width: 7px; border-radius: 1px; }
+.oi-labels { display: flex; justify-content: space-between; margin-top: 2px; }
+.oi-labels span {
+    flex: 1;
+    text-align: center;
+    font-size: 9.5px;
+    color: var(--text2);
+    font-variant-numeric: tabular-nums;
+}
+.oi-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 10.5px; color: var(--text2); margin-top: 6px; }
+.oi-legend .sw { display: inline-block; width: 8px; height: 8px; border-radius: 1px; vertical-align: middle; }
+.oicur { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--text); opacity: 0.55; }
+.oimp { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--orange); opacity: 0.8; }
+
+/* Panel info button + expandable explanation block */
+.info-btn {
+    margin-left: auto;
+    color: var(--text2);
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    font-size: 15px;
+    line-height: 1;
+}
+.info-btn:hover { color: var(--text); }
+.info-btn.on { color: var(--accent); }
+
+.pan-info {
+    display: none;
+    margin-top: 11px;
+    padding-top: 11px;
+    border-top: 1px dashed var(--border);
+}
+.pan.info-open .pan-info { display: block; }
+.pan-info .lead { font-size: 11.5px; color: var(--text2); margin: 0 0 9px; line-height: 1.45; }
+.pan-info .lead em { font-style: italic; color: var(--text); }
+.ii { margin-bottom: 9px; }
+.ii:last-child { margin-bottom: 0; }
+.ii .it { font-size: 12px; font-weight: 600; color: var(--text); display: block; margin-bottom: 1px; }
+.ii .id { font-size: 11.5px; color: var(--text2); line-height: 1.45; display: block; }
+.ii .id em { font-style: italic; color: var(--text); }
+
+/* Analysis Multi (comparison) tables — one column per ticker, sticky label column */
+.cmp-scroll { overflow-x: auto; }
+table.cmp { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.cmp th, table.cmp td { padding: 5px 8px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.cmp th.k, table.cmp td.k {
+    text-align: left;
+    font-weight: 400;
+    color: var(--text2);
+    position: sticky;
+    left: 0;
+    background: var(--bg2);
+    border-right: 1px solid var(--bg3);
+}
+table.cmp thead th { border-bottom: 1px solid var(--border); font-weight: 600; font-size: 12px; color: var(--text); vertical-align: bottom; }
+table.cmp thead .sub { display: block; font-size: 10px; font-weight: 400; color: var(--text2); }
+table.cmp tbody tr { border-bottom: 1px solid var(--bg3); }
+table.cmp tbody tr:last-child { border-bottom: none; }
+table.cmp td.warn { color: var(--orange); }
+.cmpdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+
+/* Analysis Multi: full-width comparison boxes stacked with a gap (mirrors single-mode .panels) */
+.panels-multi { display: flex; flex-direction: column; gap: 12px; }

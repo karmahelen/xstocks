@@ -58,6 +58,10 @@
     .chart-controls {
         flex-wrap: wrap;
     }
+    .chart-legend {
+        gap: 10px 14px;
+        font-size: 12px;
+    }
     .watchlist-nav-select {
         font-size: 16px; /* prevent iOS auto-zoom */
         max-width: 140px;
@@ -78,4 +82,10 @@
     .content::-webkit-scrollbar {
         display: none;
     }
+}
+
+@media (max-width: 600px) {
+    /* Analysis tab: single-column panels and tighter highlight chips */
+    .hls { grid-template-columns: 1fr; }
+    .panels { grid-template-columns: 1fr; }
 }

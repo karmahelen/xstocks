@@ -73,6 +73,83 @@ def _save_config(cfg):
         json.dump(cfg, f, indent=2)
 
 
+# -- Analysis math helpers (pure functions, no I/O — unit-testable) --
+
+def _num(x):
+    """Coerce a value (including numpy/pandas cells) to float, mapping None and NaN to None."""
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return None
+    return None if x != x else x  # x != x is True only for NaN
+
+
+def _sma(closes, n):
+    """Simple moving average of the last n closes, or None if insufficient data."""
+    if len(closes) < n:
+        return None
+    return sum(closes[-n:]) / n
+
+
+def _rsi(closes, period=14):
+    """Wilder's RSI over the given period. None if insufficient data.
+    Returns 100.0 when there are no losses in the window (fully one-directional)."""
+    if len(closes) < period + 1:
+        return None
+    gains, losses = [], []
+    for i in range(1, len(closes)):
+        d = closes[i] - closes[i - 1]
+        gains.append(max(d, 0.0))
+        losses.append(max(-d, 0.0))
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return round(100 - 100 / (1 + rs), 1)
+
+
+def _annualized_vol(closes, window=30):
+    """Annualized realized volatility (%) from daily log returns over the last `window`
+    trading days. None if insufficient data."""
+    if len(closes) < window + 1:
+        return None
+    rets = []
+    for i in range(len(closes) - window, len(closes)):
+        if i <= 0 or closes[i - 1] <= 0:
+            continue
+        rets.append(math.log(closes[i] / closes[i - 1]))
+    if len(rets) < 2:
+        return None
+    mean = sum(rets) / len(rets)
+    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+    return round(math.sqrt(var) * math.sqrt(252) * 100, 1)
+
+
+def _max_pain(call_oi, put_oi):
+    """Max-pain strike: the strike at which total in-the-money option value (what writers
+    must pay out / holders collect) is minimized. Inputs are {strike: open_interest} dicts.
+    Returns the strike, or None if there's nothing to compute over."""
+    strikes = sorted(set(call_oi) | set(put_oi))
+    if not strikes:
+        return None
+    best_k, best_val = None, None
+    for k in strikes:
+        val = 0.0
+        for s, oi in call_oi.items():
+            if k > s:
+                val += (k - s) * oi
+        for s, oi in put_oi.items():
+            if k < s:
+                val += (s - k) * oi
+        if best_val is None or val < best_val:
+            best_val, best_k = val, k
+    return best_k
+
+
 class XStocks:
     def __init__(self):
         self.config = _load_config()
@@ -136,6 +213,20 @@ class XStocks:
                 source TEXT,
                 fetched_at TEXT NOT NULL,
                 FOREIGN KEY (watchlist_id) REFERENCES watchlists(id)
+            )
+        """)
+        # IV history powers the Analysis tab's IV-rank metric. yfinance only gives a
+        # snapshot of implied volatility, so rank-vs-own-history is only possible by
+        # logging it ourselves over time — one row per symbol per day, captured
+        # opportunistically whenever the user opens the Analysis tab's options panel.
+        # Sparse by nature (only symbols the user views, only on days they view them);
+        # IV rank stays None until enough points accumulate.
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS iv_history (
+                symbol TEXT NOT NULL,
+                date TEXT NOT NULL,
+                iv30 REAL,
+                PRIMARY KEY (symbol, date)
             )
         """)
         con.commit()
@@ -775,6 +866,350 @@ class XStocks:
                 "surprise_pct": e.get("surprisePercent"),
             })
         return results
+
+    # -- Analysis (yfinance) --
+    #
+    # Split into two calls so the fast panels render immediately and the slow options
+    # panel loads after:
+    #   get_analysis()         — one info fetch + one history fetch: technicals, analyst,
+    #                            valuation/health, plus the strength/weakness highlights.
+    #   get_options_analysis() — several option_chain fetches (slow): put/call ratios,
+    #                            OI-by-strike, max pain, IV vs realized, skew, IV rank.
+    #
+    # yfinance scrapes Yahoo, so info fields and option-chain columns appear/disappear/
+    # rename between releases. Every field is pulled defensively (via _num / dict.get) and
+    # each sub-section is wrapped so a missing field degrades to "—" rather than sinking
+    # the whole tab. Highlight thresholds are intentionally simple and sector-agnostic —
+    # they flag what's notable, they are not buy/sell signals.
+
+    # Cap on how many of the nearest expirations get aggregated for options metrics. Each
+    # expiration is one network round-trip, so this bounds latency; the nearest expirations
+    # carry most of the volume and open interest anyway.
+    OPTIONS_EXP_CAP = 6
+    IV_RANK_MIN_POINTS = 5  # below this, IV history is too thin to rank against
+
+    def get_analysis(self, symbol):
+        """Fast Analysis panels: technicals (from price history), analyst consensus and
+        valuation/health (from yfinance `info`), plus derived highlights."""
+        symbol = symbol.strip().upper()
+        t = yf.Ticker(symbol)
+        try:
+            info = t.info or {}
+        except Exception:
+            info = {}
+
+        result = {"symbol": symbol, "price": None,
+                  "technicals": None, "analyst": None, "valuation": None,
+                  "highlights": []}
+        highlights = []
+
+        # Price history (1y ≈ 252 trading days — enough for a 200-day MA).
+        closes = []
+        try:
+            df = t.history(period="1y")
+            closes = [c for c in (_num(x) for x in df["Close"].tolist()) if c is not None]
+        except Exception:
+            closes = []
+
+        price = closes[-1] if closes else (_num(info.get("currentPrice")) or _num(info.get("regularMarketPrice")))
+        result["price"] = round(price, 2) if price else None
+
+        # Technicals
+        try:
+            sma50 = _sma(closes, 50)
+            sma200 = _sma(closes, 200)
+            rsi = _rsi(closes, 14)
+            hi52 = _num(info.get("fiftyTwoWeekHigh")) or (max(closes) if closes else None)
+            lo52 = _num(info.get("fiftyTwoWeekLow")) or (min(closes) if closes else None)
+            range_pos = None
+            if hi52 and lo52 and hi52 > lo52 and price:
+                range_pos = round((price - lo52) / (hi52 - lo52) * 100, 1)
+
+            rs_vs_spy = None
+            try:
+                spy = [c for c in (_num(x) for x in yf.Ticker("SPY").history(period="3mo")["Close"].tolist()) if c is not None]
+                if len(closes) >= 63 and len(spy) >= 2:
+                    sym_ret = closes[-1] / closes[-63] - 1
+                    spy_ret = spy[-1] / spy[0] - 1
+                    rs_vs_spy = round((sym_ret - spy_ret) * 100, 1)
+            except Exception:
+                pass
+
+            beta = _num(info.get("beta"))
+            result["technicals"] = {
+                "price_vs_sma50": round((price / sma50 - 1) * 100, 1) if (sma50 and price) else None,
+                "price_vs_sma200": round((price / sma200 - 1) * 100, 1) if (sma200 and price) else None,
+                "rsi": rsi,
+                "beta": round(beta, 2) if beta is not None else None,
+                "rs_vs_spy_3mo": rs_vs_spy,
+                "low_52w": round(lo52, 2) if lo52 else None,
+                "high_52w": round(hi52, 2) if hi52 else None,
+                "range_pos": range_pos,
+            }
+            if sma50 and sma200 and price:
+                if price > sma50 and price > sma200:
+                    highlights.append({"type": "strength", "title": "Uptrend intact",
+                                       "detail": "Above 50 & 200-day MA"})
+                elif price < sma50 and price < sma200:
+                    highlights.append({"type": "weakness", "title": "Downtrend",
+                                       "detail": "Below 50 & 200-day MA"})
+            if rsi is not None and rsi >= 70:
+                highlights.append({"type": "watch", "title": "Near overbought",
+                                   "detail": f"RSI {rsi} — short-term stretched"})
+            elif rsi is not None and rsi <= 30:
+                highlights.append({"type": "watch", "title": "Near oversold", "detail": f"RSI {rsi}"})
+        except Exception:
+            pass
+
+        # Analyst
+        try:
+            target_mean = _num(info.get("targetMeanPrice"))
+            implied = round((target_mean / price - 1) * 100, 1) if (target_mean and price) else None
+
+            buy = hold = sell = None
+            try:
+                rec = t.recommendations
+                if rec is not None and len(rec):
+                    row = rec.iloc[-1]  # most recent period
+                    buy = int((_num(row.get("strongBuy")) or 0) + (_num(row.get("buy")) or 0))
+                    hold = int(_num(row.get("hold")) or 0)
+                    sell = int((_num(row.get("sell")) or 0) + (_num(row.get("strongSell")) or 0))
+            except Exception:
+                pass
+
+            rec_mean = _num(info.get("recommendationMean"))
+            tlow = _num(info.get("targetLowPrice"))
+            thigh = _num(info.get("targetHighPrice"))
+            result["analyst"] = {
+                "rec_key": info.get("recommendationKey"),
+                "rec_mean": round(rec_mean, 2) if rec_mean is not None else None,
+                "num_analysts": info.get("numberOfAnalystOpinions"),
+                "target_mean": round(target_mean, 2) if target_mean else None,
+                "target_low": round(tlow, 2) if tlow else None,
+                "target_high": round(thigh, 2) if thigh else None,
+                "implied_upside": implied,
+                "buy": buy, "hold": hold, "sell": sell,
+            }
+            if implied is not None and implied >= 15:
+                highlights.append({"type": "strength", "title": "Analyst upside",
+                                   "detail": f"+{implied}% to mean target"})
+            elif implied is not None and implied <= -5:
+                highlights.append({"type": "weakness", "title": "Below analyst target",
+                                   "detail": f"{implied}% to mean target"})
+        except Exception:
+            pass
+
+        # Valuation & health
+        try:
+            peg = _num(info.get("pegRatio")) or _num(info.get("trailingPegRatio"))
+            fcf = _num(info.get("freeCashflow"))
+            mcap = _num(info.get("marketCap"))
+            fcf_yield = round(fcf / mcap * 100, 1) if (fcf and mcap) else None
+            gm = _num(info.get("grossMargins"))
+            om = _num(info.get("operatingMargins"))
+            roe = _num(info.get("returnOnEquity"))
+            d2e = _num(info.get("debtToEquity"))  # yfinance reports this as a percent (150.0 == 1.5x)
+            fpe = _num(info.get("forwardPE"))
+            tpe = _num(info.get("trailingPE"))
+            ps = _num(info.get("priceToSalesTrailing12Months"))
+            pb = _num(info.get("priceToBook"))
+            result["valuation"] = {
+                "forward_pe": round(fpe, 1) if fpe else None,
+                "trailing_pe": round(tpe, 1) if tpe else None,
+                "peg": round(peg, 2) if peg else None,
+                "ps": round(ps, 1) if ps else None,
+                "pb": round(pb, 1) if pb else None,
+                "gross_margin": round(gm * 100, 1) if gm is not None else None,
+                "operating_margin": round(om * 100, 1) if om is not None else None,
+                "roe": round(roe * 100, 1) if roe is not None else None,
+                "debt_to_equity": round(d2e, 1) if d2e is not None else None,
+                "fcf_yield": fcf_yield,
+            }
+            v = result["valuation"]
+            if v["forward_pe"] and v["forward_pe"] > 30:
+                highlights.append({"type": "weakness", "title": "Rich valuation",
+                                   "detail": f"Forward P/E {v['forward_pe']}"})
+            if v["gross_margin"] and v["gross_margin"] >= 40:
+                highlights.append({"type": "strength", "title": "Healthy margins",
+                                   "detail": f"Gross margin {v['gross_margin']}%"})
+        except Exception:
+            pass
+
+        result["highlights"] = highlights
+        return result
+
+    def get_options_analysis(self, symbol):
+        """Slow Analysis panel: aggregates the nearest expirations' option chains into
+        put/call ratios (volume, dollar-weighted, open interest), an OI-by-strike window,
+        max pain (nearest expiration), IV vs realized, an IV skew proxy, and IV rank."""
+        symbol = symbol.strip().upper()
+        t = yf.Ticker(symbol)
+        try:
+            exps = list(t.options or [])
+        except Exception:
+            exps = []
+        if not exps:
+            return {"symbol": symbol, "available": False, "highlights": []}
+
+        try:
+            price = _num(t.fast_info.last_price)
+        except Exception:
+            price = None
+
+        near_exps = exps[:self.OPTIONS_EXP_CAP]
+        chains = {}
+        total_call_vol = total_put_vol = 0.0
+        total_call_prem = total_put_prem = 0.0
+        total_call_oi = total_put_oi = 0.0
+        oi_by_strike = {}  # strike -> [call_oi, put_oi]
+
+        for e in near_exps:
+            try:
+                chain = t.option_chain(e)
+            except Exception:
+                continue
+            chains[e] = chain
+            for df, idx in ((chain.calls, 0), (chain.puts, 1)):
+                for _, r in df.iterrows():
+                    strike = _num(r.get("strike"))
+                    if strike is None:
+                        continue
+                    vol = _num(r.get("volume")) or 0.0
+                    oi = _num(r.get("openInterest")) or 0.0
+                    last = _num(r.get("lastPrice")) or 0.0
+                    prem = last * vol * 100
+                    if idx == 0:
+                        total_call_vol += vol; total_call_prem += prem; total_call_oi += oi
+                    else:
+                        total_put_vol += vol; total_put_prem += prem; total_put_oi += oi
+                    bucket = oi_by_strike.setdefault(round(strike, 2), [0.0, 0.0])
+                    bucket[idx] += oi
+
+        pc_vol = round(total_put_vol / total_call_vol, 2) if total_call_vol else None
+        pc_prem = round(total_put_prem / total_call_prem, 2) if total_call_prem else None
+        pc_oi = round(total_put_oi / total_call_oi, 2) if total_call_oi else None
+
+        # Max pain from the nearest expiration only (it's an expiry-specific concept).
+        max_pain = None
+        if near_exps and near_exps[0] in chains:
+            c0 = chains[near_exps[0]]
+            call_oi = {}
+            put_oi = {}
+            for _, r in c0.calls.iterrows():
+                s = _num(r.get("strike")); o = _num(r.get("openInterest"))
+                if s is not None and o:
+                    call_oi[s] = o
+            for _, r in c0.puts.iterrows():
+                s = _num(r.get("strike")); o = _num(r.get("openInterest"))
+                if s is not None and o:
+                    put_oi[s] = o
+            mp = _max_pain(call_oi, put_oi)
+            max_pain = round(mp, 2) if mp is not None else None
+
+        # IV (≈30d ATM) and skew proxy from the expiration nearest 30 days out.
+        iv30 = skew = None
+        exp30_label = None
+        try:
+            target = datetime.now().date() + timedelta(days=30)
+            exp30 = min(chains.keys(),
+                        key=lambda e: abs((datetime.strptime(e, "%Y-%m-%d").date() - target).days))
+            exp30_label = exp30
+            c = chains[exp30]
+            if price:
+                atm = [v for v in (self._iv_nearest(c.calls, price), self._iv_nearest(c.puts, price)) if v is not None]
+                if atm:
+                    iv30 = round(sum(atm) / len(atm) * 100, 1)
+                otm_put = self._iv_nearest(c.puts, price * 0.9)
+                otm_call = self._iv_nearest(c.calls, price * 1.1)
+                if otm_put is not None and otm_call is not None:
+                    skew = round((otm_put - otm_call) * 100, 1)  # vol points, puts minus calls
+        except Exception:
+            pass
+
+        # Realized vol (30d) from 3 months of closes.
+        realized = None
+        try:
+            closes = [c for c in (_num(x) for x in t.history(period="3mo")["Close"].tolist()) if c is not None]
+            realized = _annualized_vol(closes, 30)
+        except Exception:
+            pass
+
+        # IV rank — capture today's IV, then rank against accumulated history.
+        iv_rank = None
+        iv_rank_points = 0
+        if iv30 is not None:
+            self._record_iv(symbol, iv30)
+            iv_rank, iv_rank_points = self._iv_rank(symbol, iv30)
+
+        # OI-by-strike window: ±15% of spot, capped to the highest-OI strikes for a clean chart.
+        hist = []
+        if price:
+            lo, hi = price * 0.85, price * 1.15
+            items = [(k, v[0], v[1]) for k, v in oi_by_strike.items() if lo <= k <= hi and (v[0] + v[1]) > 0]
+            items.sort(key=lambda x: -(x[1] + x[2]))
+            items = items[:15]
+            items.sort(key=lambda x: x[0])
+            hist = [{"strike": k, "call_oi": round(c), "put_oi": round(p)} for k, c, p in items]
+
+        highlights = []
+        if pc_oi is not None and pc_oi < 0.7:
+            highlights.append({"type": "watch", "title": "Call-heavy positioning",
+                               "detail": f"Put/call OI {pc_oi}"})
+        elif pc_oi is not None and pc_oi > 1.3:
+            highlights.append({"type": "watch", "title": "Put-heavy positioning",
+                               "detail": f"Put/call OI {pc_oi}"})
+        if iv30 and realized and iv30 > realized * 1.2:
+            highlights.append({"type": "watch", "title": "Options pricing rich",
+                               "detail": f"IV {iv30}% vs realized {realized}%"})
+
+        return {
+            "symbol": symbol, "available": True, "price": round(price, 2) if price else None,
+            "expirations_used": len(chains),
+            "pc_vol": pc_vol, "pc_prem": pc_prem, "pc_oi": pc_oi,
+            "max_pain": max_pain, "max_pain_exp": near_exps[0] if near_exps else None,
+            "iv30": iv30, "iv30_exp": exp30_label, "realized_vol": realized, "skew": skew,
+            "iv_rank": iv_rank, "iv_rank_points": iv_rank_points,
+            "oi_by_strike": hist,
+            "highlights": highlights,
+        }
+
+    @staticmethod
+    def _iv_nearest(df, target_strike):
+        """Implied volatility of the row whose strike is nearest target_strike (skipping
+        rows with missing/zero IV). None if none usable."""
+        best, best_d = None, None
+        for _, r in df.iterrows():
+            s = _num(r.get("strike"))
+            iv = _num(r.get("impliedVolatility"))
+            if s is None or not iv:
+                continue
+            d = abs(s - target_strike)
+            if best_d is None or d < best_d:
+                best_d, best = d, iv
+        return best
+
+    def _record_iv(self, symbol, iv30):
+        """Store today's IV for a symbol (one row per day; re-running same day overwrites)."""
+        con = self._connect()
+        con.execute(
+            "INSERT OR REPLACE INTO iv_history (symbol, date, iv30) VALUES (?, ?, ?)",
+            (symbol, datetime.now().strftime("%Y-%m-%d"), iv30),
+        )
+        con.commit()
+        con.close()
+
+    def _iv_rank(self, symbol, current_iv):
+        """Percentile rank of current_iv within this symbol's stored IV history.
+        Returns (rank_pct, n_points); rank is None until IV_RANK_MIN_POINTS accumulate."""
+        con = self._connect()
+        rows = con.execute("SELECT iv30 FROM iv_history WHERE symbol = ?", (symbol,)).fetchall()
+        con.close()
+        vals = [r["iv30"] for r in rows if r["iv30"] is not None]
+        n = len(vals)
+        if n < self.IV_RANK_MIN_POINTS:
+            return None, n
+        below = sum(1 for v in vals if v < current_iv)
+        return round(below / n * 100), n
 
     # -- Auto-refresh scheduler --
 

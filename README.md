@@ -13,6 +13,8 @@ The interesting thing that I tried to do with this is that since it is written i
 * Stock quotes (when "refreshed") are stored in a local database (xstocks.db) to build up your own dataset
 * Can quickly move through chart data and chart from your database
 * News and Earnings per stock ticker
+* Analysis per stock ticker
+* Able to select multiple tickers to do comparisons in both chart and analysis views.
 
 I would definitely like to add more features based on feedback.
 
