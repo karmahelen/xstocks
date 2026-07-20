@@ -317,7 +317,7 @@ function showSettings() {
                     Automatically refresh data at
                 </label>
                 <input type="time" id="autoRefreshTimeInput" class="time-input"
-                       value="${autoRefreshTime}"
+                       value="${escapeHtml(autoRefreshTime)}"
                        ${autoRefreshEnabled ? '' : 'disabled'}
                        style="${autoRefreshEnabled ? '' : 'opacity:0.4'}">
             </div>
