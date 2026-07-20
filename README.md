@@ -1,5 +1,7 @@
 # xstocks
 
+[![Code Status](https://github.com/karmahelen/hearth/actions/workflows/security-scans.yml/badge.svg)](https://github.com/karmahelen/hearth/security/code-scanning)
+
 xstocks is a personal stocks watchlist app built on the Hearth framework (https://github.com/karmahelen/hearth). It uses Finnhub for real-time quotes, news, and earnings + yfinance for historical chart data and fallback. Quotes data is stored in a SQLite database (xstocks.db) locally.
 
 I got frustrated when the built-in stocks widget stopped working for me on my android phone so I decided to create something that I could have more control over.
